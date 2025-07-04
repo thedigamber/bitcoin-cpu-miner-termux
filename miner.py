@@ -71,9 +71,9 @@ class TermuxMiner:
     def install_dependencies(self):
         """Install all required dependencies"""
         required = [
-            "git", "autoconf", "automake", "libtool", "pkg-config",
-            "make", "gcc", "curl", "libcurl4-openssl-dev", "libssl-dev",
-            "libjansson-dev", "libgmp-dev", "zlib1g-dev"
+    "git", "autoconf", "automake", "libtool", "pkg-config",
+    "make", "clang", "curl", "libcurl-dev", "openssl-dev",
+    "libjansson-dev", "libgmp-dev", "zlib-dev"
         ]
         
         print(Fore.YELLOW + "Checking and installing dependencies...")
