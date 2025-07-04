@@ -69,19 +69,20 @@ class TermuxMiner:
             sys.exit(1)
 
     def install_dependencies(self):
-        """Install all required dependencies"""
+        """Install all required dependencies (2025 Termux compatible)"""
+        # Updated working Termux packages (no "-dev")
         required = [
-    "git", "autoconf", "automake", "libtool", "pkg-config",
-    "make", "clang", "curl", "libcurl-dev", "openssl-dev",
-    "libjansson-dev", "libgmp-dev", "zlib-dev"
+            "git", "autoconf", "automake", "libtool", "pkg-config",
+            "make", "clang", "curl", "libcurl", "openssl",
+            "libjansson", "libgmp", "zlib"
         ]
-        
+
         print(Fore.YELLOW + "Checking and installing dependencies...")
-        
+
         for pkg in required:
             try:
-                subprocess.run(["dpkg", "-s", pkg], check=True, 
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                subprocess.run(["dpkg", "-s", pkg], check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             except subprocess.CalledProcessError:
                 print(Fore.RED + f"Installing {pkg}...")
                 try:
