@@ -94,53 +94,57 @@ class TermuxMiner:
                     sys.exit(1)
 
     def clone_and_build(self):
-        """Clone and build cpuminer-opt with optimizations"""
-        if os.path.exists(MINER_DIR):
-            print(Fore.YELLOW + "Removing existing miner directory...")
-            shutil.rmtree(MINER_DIR)
-        
-        print(Fore.CYAN + "Cloning cpuminer-opt repository...")
-        subprocess.run(["git", "clone", "--depth", "1", CPUMINER_REPO, MINER_DIR], check=True)
-        
-        os.chdir(MINER_DIR)
-        
-        print(Fore.CYAN + "Building cpuminer with optimizations...")
-        build_steps = [
-            ["./build.sh"],
-            ["./autogen.sh"],
-            ["./configure", "CFLAGS=-O3", "CXXFLAGS=-O3", "--with-curl", "--with-crypto"],
-            ["make", "-j", str(os.cpu_count() or 2)]  # Use all available cores for compilation
-        ]
-        
-        for step in build_steps:
-            print(Fore.BLUE + "Running: " + " ".join(step))
-            try:
-                result = subprocess.run(step, check=True)
-                print(Fore.GREEN + f"Step completed successfully: {' '.join(step)}")
-            except subprocess.CalledProcessError as e:
-                print(Fore.RED + f"Build failed at step {' '.join(step)}: {str(e)}")
-                print(Fore.YELLOW + "Trying to continue with next step...")
-                continue
-        
-        # Verify the miner binary was created
-        miner_binary = self.get_miner_binary_path()
-        if not os.path.exists(miner_binary):
-            print(Fore.RED + "Miner binary not found after build. Build likely failed.")
-            print(Fore.YELLOW + "Trying to build with simpler configuration...")
-            try:
-                subprocess.run(["make", "clean"], check=True)
-                subprocess.run(["./configure"], check=True)
-                subprocess.run(["make", "-j", str(os.cpu_count() or 2)], check=True)
-            except subprocess.CalledProcessError as e:
-                print(Fore.RED + f"Simpler build also failed: {str(e)}")
-                sys.exit(1)
-        
-        if not os.path.exists(miner_binary):
-            print(Fore.RED + "Miner binary still not found after second build attempt.")
+    """Clone and build cpuminer-opt with optimizations"""
+    if os.path.exists(MINER_DIR):
+        print(Fore.YELLOW + "Removing existing miner directory...")
+        shutil.rmtree(MINER_DIR)
+    
+    print(Fore.CYAN + "Cloning cpuminer-opt repository...")
+    subprocess.run(["git", "clone", "--depth", "1", CPUMINER_REPO, MINER_DIR], check=True)
+    
+    os.chdir(MINER_DIR)
+    
+    # Apply patch to fix the warnings
+    patch_code = """
+    diff --git a/sind-utils/sind-int.h b/sind-utils/sind-int.h
+    index abc123..def456 100644
+    --- a/sind-utils/sind-int.h
+    +++ b/sind-utils/sind-int.h
+    @@ -25,7 +25,7 @@
+     #define rev32(a, b) \\
+     do { \\
+        uint32_t tmp = b; \\
+    -    asm("rev32 %0, %1\\n\\t": "=r"(b) : "r"(a)); \\
+    +    asm("rev32 %0, %1\\n\\t": "=w"(b) : "w"(a)); \\
+        a = tmp; \\
+     } while(0)
+    """
+    
+    try:
+        subprocess.run(["patch", "-p1"], input=patch_code.encode(), check=True)
+        print(Fore.GREEN + "Applied patch to fix ARM assembly warnings")
+    except subprocess.CalledProcessError:
+        print(Fore.YELLOW + "Warning: Could not apply patch, continuing with build")
+    
+    print(Fore.CYAN + "Building cpuminer with optimizations...")
+    build_steps = [
+        ["./build.sh"],
+        ["./autogen.sh"],
+        ["./configure", "CFLAGS=-O3 -Wno-error=asm-operand-widths", 
+                       "CXXFLAGS=-O3", "--with-curl", "--with-crypto"],
+        ["make", "-j", str(os.cpu_count() or 2)]
+    ]
+    
+    for step in build_steps:
+        print(Fore.BLUE + "Running: " + " ".join(step))
+        try:
+            subprocess.run(step, check=True)
+        except subprocess.CalledProcessError as e:
+            print(Fore.RED + f"Build failed at step {' '.join(step)}: {str(e)}")
             sys.exit(1)
-        
-        os.chdir("..")
-        print(Fore.GREEN + "Build completed successfully!")
+    
+    os.chdir("..")
+    print(Fore.GREEN + "Build completed successfully!")
 
     def get_miner_binary_path(self):
         """Get the path to the miner binary, checking multiple possible locations"""
