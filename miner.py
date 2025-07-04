@@ -83,10 +83,12 @@ class TermuxMiner:
             try:
                 subprocess.run(["dpkg", "-s", pkg], check=True,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                print(Fore.GREEN + f"{pkg} is already installed")
             except subprocess.CalledProcessError:
-                print(Fore.RED + f"Installing {pkg}...")
+                print(Fore.YELLOW + f"Installing {pkg}...")
                 try:
                     subprocess.run(["pkg", "install", "-y", pkg], check=True)
+                    print(Fore.GREEN + f"Successfully installed {pkg}")
                 except subprocess.CalledProcessError as e:
                     print(Fore.RED + f"Failed to install {pkg}: {str(e)}")
                     sys.exit(1)
@@ -113,13 +115,46 @@ class TermuxMiner:
         for step in build_steps:
             print(Fore.BLUE + "Running: " + " ".join(step))
             try:
-                subprocess.run(step, check=True)
+                result = subprocess.run(step, check=True)
+                print(Fore.GREEN + f"Step completed successfully: {' '.join(step)}")
             except subprocess.CalledProcessError as e:
                 print(Fore.RED + f"Build failed at step {' '.join(step)}: {str(e)}")
+                print(Fore.YELLOW + "Trying to continue with next step...")
+                continue
+        
+        # Verify the miner binary was created
+        miner_binary = self.get_miner_binary_path()
+        if not os.path.exists(miner_binary):
+            print(Fore.RED + "Miner binary not found after build. Build likely failed.")
+            print(Fore.YELLOW + "Trying to build with simpler configuration...")
+            try:
+                subprocess.run(["make", "clean"], check=True)
+                subprocess.run(["./configure"], check=True)
+                subprocess.run(["make", "-j", str(os.cpu_count() or 2)], check=True)
+            except subprocess.CalledProcessError as e:
+                print(Fore.RED + f"Simpler build also failed: {str(e)}")
                 sys.exit(1)
+        
+        if not os.path.exists(miner_binary):
+            print(Fore.RED + "Miner binary still not found after second build attempt.")
+            sys.exit(1)
         
         os.chdir("..")
         print(Fore.GREEN + "Build completed successfully!")
+
+    def get_miner_binary_path(self):
+        """Get the path to the miner binary, checking multiple possible locations"""
+        possible_paths = [
+            os.path.join(MINER_DIR, "cpuminer"),
+            os.path.join(MINER_DIR, "minerd"),
+            os.path.join(MINER_DIR, "cpuminer-avx2"),
+            os.path.join(MINER_DIR, "cpuminer-opt")
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+        return possible_paths[0]  # Return default path even if not found
 
     def load_config(self):
         """Load or create configuration"""
@@ -235,13 +270,17 @@ class TermuxMiner:
         print(Fore.MAGENTA + "=== Starting Benchmark Mode ===")
         self.benchmark_mode = True
         
-        miner_path = os.path.join(MINER_DIR, "cpuminer")
-        if not os.path.exists(miner_path):
-            print(Fore.RED + "Miner binary not found. Did the build fail?")
-            sys.exit(1)
+        miner_binary = self.get_miner_binary_path()
+        if not os.path.exists(miner_binary):
+            print(Fore.RED + "Miner binary not found. Trying to build first...")
+            self.clone_and_build()
+            miner_binary = self.get_miner_binary_path()
+            if not os.path.exists(miner_binary):
+                print(Fore.RED + "Miner binary still not found after build.")
+                return
         
         command = [
-            miner_path,
+            miner_binary,
             "--benchmark",
             "--algo=sha256d",
             "--time-limit=30"  # 30 second benchmark
@@ -279,17 +318,21 @@ class TermuxMiner:
 
     def start_mining(self):
         """Start the mining process"""
-        miner_path = os.path.join(MINER_DIR, "cpuminer")
+        miner_binary = self.get_miner_binary_path()
         
-        if not os.path.exists(miner_path):
-            print(Fore.RED + "Miner binary not found. Did the build fail?")
-            sys.exit(1)
+        if not os.path.exists(miner_binary):
+            print(Fore.RED + "Miner binary not found. Trying to build first...")
+            self.clone_and_build()
+            miner_binary = self.get_miner_binary_path()
+            if not os.path.exists(miner_binary):
+                print(Fore.RED + "Miner binary still not found after build.")
+                return
         
         if not self.current_pool:
             self.select_best_pool()
         
         command = [
-            miner_path,
+            miner_binary,
             "-a", "sha256d",
             "-o", self.current_pool["url"],
             "-u", f"{self.wallet_address}.{self.worker_name}",
@@ -497,10 +540,20 @@ class TermuxMiner:
             subprocess.run(["git", "pull"], check=True)
             subprocess.run(["make", "clean"], check=True)
             subprocess.run(["./build.sh"], check=True)
+            subprocess.run(["./autogen.sh"], check=True)
+            subprocess.run(["./configure", "CFLAGS=-O3", "CXXFLAGS=-O3", "--with-curl", "--with-crypto"], check=True)
             subprocess.run(["make", "-j", str(os.cpu_count() or 2)], check=True)
             print(Fore.GREEN + "Miner updated successfully!")
         except subprocess.CalledProcessError as e:
             print(Fore.RED + f"Update failed: {str(e)}")
+            print(Fore.YELLOW + "Trying simpler build...")
+            try:
+                subprocess.run(["make", "clean"], check=True)
+                subprocess.run(["./configure"], check=True)
+                subprocess.run(["make", "-j", str(os.cpu_count() or 2)], check=True)
+                print(Fore.GREEN + "Miner updated with simpler configuration!")
+            except subprocess.CalledProcessError as e:
+                print(Fore.RED + f"Simpler build also failed: {str(e)}")
         finally:
             os.chdir("..")
 
@@ -526,6 +579,12 @@ def main():
         
         # Install dependencies if needed
         miner.install_dependencies()
+        
+        # Build the miner if not already built
+        miner_binary = miner.get_miner_binary_path()
+        if not os.path.exists(miner_binary):
+            print(Fore.YELLOW + "Building miner for the first time...")
+            miner.clone_and_build()
         
         # Load or create config
         miner.load_config()
